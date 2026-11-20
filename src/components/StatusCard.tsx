@@ -36,12 +36,16 @@ export default function StatusCard({ evals, extraItems, ai, tdsForecast, waterCh
   items.push(...extraItems);
   if (ai?.anomaly) items.push({ level: "watch", text: "AI found unusual readings" });
 
-  const level: Level = items.some((i) => i.level === "bad") ? "bad" : items.length ? "watch" : "good";
+  // No water reading at all -> we cannot say the tank is healthy.
+  const noData = Object.values(evals).every((e) => e.level === "unknown");
+  const level: Level = noData
+    ? "unknown"
+    : items.some((i) => i.level === "bad") ? "bad" : items.length ? "watch" : "good";
   const headline = {
     good: "Your tank is healthy",
     watch: "Your tank is healthy",
     bad: "Your tank needs attention",
-    unknown: "Waiting for data",
+    unknown: "No readings from the sensor node",
   }[level];
 
   const reachAt = tdsForecast?.reach_at;
@@ -78,7 +82,9 @@ export default function StatusCard({ evals, extraItems, ai, tdsForecast, waterCh
           {estopOn ? "Emergency stop is on" : headline}
         </h2>
         <p className="mt-2 max-w-2xl text-[15px] leading-relaxed text-slate-700">
-          {items.length === 0 ? (
+          {noData ? (
+            "Check that the sensor node is powered on and its probes are plugged in. Readings appear here as soon as the gateway receives them."
+          ) : items.length === 0 ? (
             "All readings are in the safe range."
           ) : (
             <>
