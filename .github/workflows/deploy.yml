@@ -1,0 +1,89 @@
+# Build the dashboard and deploy it to Firebase Hosting.
+#  - Push to main      -> lint, type-check, build, deploy to the live site
+#  - Pull request      -> same checks, then deploy to a temporary preview URL
+#                         (posted as a comment on the PR, expires after 7 days)
+#
+# Repository secrets needed (Settings -> Secrets and variables -> Actions):
+#   FIREBASE_SERVICE_ACCOUNT                  service-account JSON key (see README)
+#   NEXT_PUBLIC_FB_API_KEY                    same values as your .env.local
+#   NEXT_PUBLIC_NEXTAUTH_DOMAIN
+#   NEXT_PUBLIC_NEXTAUTH_DATABASE_URL
+#   NEXT_PUBLIC_NEXTAUTH_PROJECT_ID
+#   NEXT_PUBLIC_NEXTAUTH_STORAGE_BUCKET
+#   NEXT_PUBLIC_NEXTAUTH_MESSAGING_SENDER_ID
+#   NEXT_PUBLIC_NEXTAUTH_APP_ID
+
+name: Build and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: # "Run workflow" button in the Actions tab
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write # lets the deploy action comment the preview URL
+
+    env:
+      NEXT_PUBLIC_FB_API_KEY: ${{ secrets.NEXT_PUBLIC_FB_API_KEY }}
+      NEXT_PUBLIC_NEXTAUTH_DOMAIN: ${{ secrets.NEXT_PUBLIC_NEXTAUTH_DOMAIN }}
+      NEXT_PUBLIC_NEXTAUTH_DATABASE_URL: ${{ secrets.NEXT_PUBLIC_NEXTAUTH_DATABASE_URL }}
+      NEXT_PUBLIC_NEXTAUTH_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_NEXTAUTH_PROJECT_ID }}
+      NEXT_PUBLIC_NEXTAUTH_STORAGE_BUCKET: ${{ secrets.NEXT_PUBLIC_NEXTAUTH_STORAGE_BUCKET }}
+      NEXT_PUBLIC_NEXTAUTH_MESSAGING_SENDER_ID: ${{ secrets.NEXT_PUBLIC_NEXTAUTH_MESSAGING_SENDER_ID }}
+      NEXT_PUBLIC_NEXTAUTH_APP_ID: ${{ secrets.NEXT_PUBLIC_NEXTAUTH_APP_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check Firebase config is set
+        run: |
+          missing=0
+          for v in NEXT_PUBLIC_FB_API_KEY NEXT_PUBLIC_NEXTAUTH_DATABASE_URL NEXT_PUBLIC_NEXTAUTH_PROJECT_ID NEXT_PUBLIC_NEXTAUTH_APP_ID; do
+            if [ -z "${!v}" ]; then echo "::error::Repository secret $v is not set"; missing=1; fi
+          done
+          exit $missing
+
+      - name: Lint
+        run: npx eslint src
+
+      # next build also type-checks (it generates route types like LayoutProps
+      # first, so a plain `tsc` before the build would fail on a clean checkout).
+      - name: Type-check and build (static export to ./out)
+        run: npm run build
+
+      # Pull requests from forks cannot read secrets, so skip their deploy.
+      - name: Deploy preview (pull request)
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: shark-tank-83aaf
+          expires: 7d
+
+      - name: Deploy live (main)
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: shark-tank-83aaf
+          channelId: live
